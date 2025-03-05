@@ -1,0 +1,238 @@
+#include "rclcpp/rclcpp.hpp"
+#include "rclcpp/qos.hpp"
+#include <sensor_msgs/msg/imu.hpp>
+#include "motion_msgs/msg/leg_motors.hpp"
+#include "motion_msgs/msg/motion_ctrl.hpp"
+#include "ception_msgs/msg/imu_euler.hpp"
+#include <fstream>
+#include <iomanip>
+#include <mutex>
+#include <sstream>
+#include <chrono>
+#include <ctime>
+#include <message_filters/subscriber.h>
+#include <message_filters/synchronizer.h>
+#include <message_filters/sync_policies/approximate_time.h>
+
+class DataSubscriberNode : public rclcpp::Node
+{
+public:
+    DataSubscriberNode()
+    : Node("data_subscriber_node"), motion_ctrl_received_(false)
+    {
+        RCLCPP_INFO(this->get_logger(), "DataSubscriberNode constructed");
+    }
+
+    ~DataSubscriberNode()
+    {
+        RCLCPP_INFO(this->get_logger(), "Destroying DataSubscriberNode");
+        std::lock_guard<std::mutex> lock(file_mutex_);
+        if (data_file_.is_open()) {
+            data_file_.close();
+            RCLCPP_INFO(this->get_logger(), "CSV file closed");
+        }
+    }
+
+    void init()
+    {
+        RCLCPP_INFO(this->get_logger(), "Initializing DataSubscriberNode");
+
+        auto qos = rclcpp::SystemDefaultsQoS();
+
+        imu_subscriber_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Imu>>(
+            this->shared_from_this(), "/diablo/sensor/Imu", qos.get_rmw_qos_profile());
+
+        motors_subscriber_ = std::make_shared<message_filters::Subscriber<motion_msgs::msg::LegMotors>>(
+            this->shared_from_this(), "/diablo/sensor/Motors", qos.get_rmw_qos_profile());
+
+        imu_euler_subscriber_ = std::make_shared<message_filters::Subscriber<ception_msgs::msg::IMUEuler>>(
+            this->shared_from_this(), "/diablo/sensor/ImuEuler", qos.get_rmw_qos_profile());
+
+        using SyncPolicy = message_filters::sync_policies::ApproximateTime<
+            sensor_msgs::msg::Imu,
+            motion_msgs::msg::LegMotors,
+            ception_msgs::msg::IMUEuler>;
+
+        sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
+            SyncPolicy(100), *imu_subscriber_, *motors_subscriber_, *imu_euler_subscriber_);
+
+        sync_->registerCallback(std::bind(&DataSubscriberNode::syncCallback, this,
+                                          std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+
+        initializeCSVFile();
+
+        motion_ctrl_subscriber_ = this->create_subscription<motion_msgs::msg::MotionCtrl>(
+            "/diablo/MotionCmd", 10, std::bind(&DataSubscriberNode::motionCtrlCallback, this, std::placeholders::_1));
+
+        RCLCPP_INFO(this->get_logger(), "DataSubscriberNode initialized successfully");
+    }
+
+private:
+    using SyncPolicy = message_filters::sync_policies::ApproximateTime<
+        sensor_msgs::msg::Imu,
+        motion_msgs::msg::LegMotors,
+        ception_msgs::msg::IMUEuler>;
+
+    std::shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Imu>> imu_subscriber_;
+    std::shared_ptr<message_filters::Subscriber<motion_msgs::msg::LegMotors>> motors_subscriber_;
+    std::shared_ptr<message_filters::Subscriber<ception_msgs::msg::IMUEuler>> imu_euler_subscriber_;
+    rclcpp::Subscription<motion_msgs::msg::MotionCtrl>::SharedPtr motion_ctrl_subscriber_;
+
+    std::shared_ptr<message_filters::Synchronizer<SyncPolicy>> sync_;
+    motion_msgs::msg::MotionCtrl last_motion_ctrl_;
+    bool motion_ctrl_received_;
+    std::mutex file_mutex_;
+
+    std::ofstream data_file_;
+
+    void initializeCSVFile()
+    {
+        std::lock_guard<std::mutex> lock(file_mutex_);
+
+        try {
+            auto now = std::chrono::system_clock::now();
+            auto time_t_now = std::chrono::system_clock::to_time_t(now);
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                now.time_since_epoch()) % 1000;
+
+            std::stringstream timestamp;
+            timestamp << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S")
+                      << "_" << std::setfill('0') << std::setw(3) << ms.count();
+
+            std::string full_path = "/home/pc/BA_data_record/diablo_data_" + timestamp.str() + ".csv";
+
+            data_file_.open(full_path, std::ios::out);
+            if (!data_file_.is_open()) {
+                RCLCPP_ERROR(this->get_logger(), "Failed to open CSV file at %s", full_path.c_str());
+                return;
+            }
+
+            data_file_ << "ROS2 Timestamp (sec),ROS2 Timestamp (nanosec),"
+                       << "orientation_x,orientation_y,orientation_z,orientation_w,"
+                       << "angular_velocity_x,angular_velocity_y,angular_velocity_z,"
+                       << "linear_acceleration_x,linear_acceleration_y,linear_acceleration_z,"
+                       << "left_hip_enc_rev,left_hip_pos,left_hip_vel,left_hip_iq,"
+                       << "left_knee_enc_rev,left_knee_pos,left_knee_vel,left_knee_iq,"
+                       << "left_wheel_enc_rev,left_wheel_pos,left_wheel_vel,left_wheel_iq,"
+                       << "right_hip_enc_rev,right_hip_pos,right_hip_vel,right_hip_iq,"
+                       << "right_knee_enc_rev,right_knee_pos,right_knee_vel,right_knee_iq,"
+                       << "right_wheel_enc_rev,right_wheel_pos,right_wheel_vel,right_wheel_iq,"
+                       << "left_leg_length,right_leg_length,"
+                       << "roll,pitch,yaw,"
+                       << "forward,left,up,roll,pitch,leg_split\n";
+            data_file_.flush();
+
+            RCLCPP_INFO(this->get_logger(), "CSV file created: %s", full_path.c_str());
+        } catch (const std::exception &e) {
+            RCLCPP_ERROR(this->get_logger(), "Exception during CSV file initialization: %s", e.what());
+        }
+    }
+
+    void motionCtrlCallback(const motion_msgs::msg::MotionCtrl::SharedPtr msg)
+    {
+        std::lock_guard<std::mutex> lock(file_mutex_);
+        last_motion_ctrl_ = *msg;
+        motion_ctrl_received_ = true;
+        RCLCPP_INFO(this->get_logger(), "Updated MotionCtrl: forward=%.2f, left=%.2f, up=%.2f, roll=%.2f, pitch=%.2f, leg_split=%.2f",
+                    last_motion_ctrl_.value.forward, last_motion_ctrl_.value.left, last_motion_ctrl_.value.up,
+                    last_motion_ctrl_.value.roll, last_motion_ctrl_.value.pitch, last_motion_ctrl_.value.leg_split);
+    }
+
+    void syncCallback(
+        const sensor_msgs::msg::Imu::ConstSharedPtr &imu_msg,
+        const motion_msgs::msg::LegMotors::ConstSharedPtr &motors_msg,
+        const ception_msgs::msg::IMUEuler::ConstSharedPtr &imu_euler_msg)
+    {
+        // 使用 ROS2 系统时间作为统一时间戳
+        auto unified_timestamp = this->now();
+        logToCSV(unified_timestamp, imu_msg, motors_msg, imu_euler_msg);
+    }
+
+    void logToCSV(const rclcpp::Time &timestamp,
+                const sensor_msgs::msg::Imu::ConstSharedPtr &imu_msg,
+                const motion_msgs::msg::LegMotors::ConstSharedPtr &motors_msg,
+                const ception_msgs::msg::IMUEuler::ConstSharedPtr &imu_euler_msg)
+    {
+        std::lock_guard<std::mutex> lock(file_mutex_);
+
+        if (!data_file_.is_open()) {
+            RCLCPP_ERROR(this->get_logger(), "CSV file is not open.");
+            return;
+        }
+
+        // 写入 ROS2 系统时间戳
+        data_file_ << timestamp.seconds() << "," << timestamp.nanoseconds() << ",";
+
+        // 写入 IMU 数据
+        data_file_ << std::fixed << std::setprecision(6)
+                   << imu_msg->orientation.x << ","
+                   << imu_msg->orientation.y << ","
+                   << imu_msg->orientation.z << ","
+                   << imu_msg->orientation.w << ","
+                   << imu_msg->angular_velocity.x << ","
+                   << imu_msg->angular_velocity.y << ","
+                   << imu_msg->angular_velocity.z << ","
+                   << imu_msg->linear_acceleration.x << ","
+                   << imu_msg->linear_acceleration.y << ","
+                   << imu_msg->linear_acceleration.z << ",";
+
+        // 写入 LegMotors 数据
+        data_file_ << motors_msg->left_hip_enc_rev << ","
+                   << motors_msg->left_hip_pos << ","
+                   << motors_msg->left_hip_vel << ","
+                   << motors_msg->left_hip_iq << ","
+                   << motors_msg->left_knee_enc_rev << ","
+                   << motors_msg->left_knee_pos << ","
+                   << motors_msg->left_knee_vel << ","
+                   << motors_msg->left_knee_iq << ","
+                   << motors_msg->left_wheel_enc_rev << ","
+                   << motors_msg->left_wheel_pos << ","
+                   << motors_msg->left_wheel_vel << ","
+                   << motors_msg->left_wheel_iq << ","
+                   << motors_msg->right_hip_enc_rev << ","
+                   << motors_msg->right_hip_pos << ","
+                   << motors_msg->right_hip_vel << ","
+                   << motors_msg->right_hip_iq << ","
+                   << motors_msg->right_knee_enc_rev << ","
+                   << motors_msg->right_knee_pos << ","
+                   << motors_msg->right_knee_vel << ","
+                   << motors_msg->right_knee_iq << ","
+                   << motors_msg->right_wheel_enc_rev << ","
+                   << motors_msg->right_wheel_pos << ","
+                   << motors_msg->right_wheel_vel << ","
+                   << motors_msg->right_wheel_iq << ","
+                   << motors_msg->left_leg_length << ","
+                   << motors_msg->right_leg_length << ",";
+
+        // 写入 imu_euler 数据
+        data_file_ << std::fixed << std::setprecision(6)
+                   << imu_euler_msg->roll << ","
+                   << imu_euler_msg->pitch << ","
+                   << imu_euler_msg->yaw << ",";
+
+        // 写入 MotionCtrl 数据
+        data_file_ << std::fixed << std::setprecision(6)
+                   << last_motion_ctrl_.value.forward << ","
+                   << last_motion_ctrl_.value.left << ","
+                   << last_motion_ctrl_.value.up << ","
+                   << last_motion_ctrl_.value.roll << ","
+                   << last_motion_ctrl_.value.pitch << ","
+                   << last_motion_ctrl_.value.leg_split << "\n";
+
+        data_file_.flush();
+        RCLCPP_INFO(this->get_logger(), "Synchronized data written to CSV");
+    }
+};
+
+int main(int argc, char **argv)
+{
+    rclcpp::init(argc, argv);
+    auto node = std::make_shared<DataSubscriberNode>();
+    node->init();
+    rclcpp::spin(node);
+    rclcpp::shutdown();
+    return 0;
+}
+
+
+
