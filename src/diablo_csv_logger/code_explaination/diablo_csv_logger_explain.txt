@@ -14,11 +14,28 @@
 #include <message_filters/synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
 
+# class 在c++中是一种封装数据和行为的模板，定义了属性和方法，然后我们可以用这个类创建具体的对象object。
+class 类名 {
+private:   // 私有成员
+    // 只能在类内部访问的变量或方法
+
+public:    // 公有成员
+    // 可以在类外部访问的变量或方法
+
+    // 构造函数
+    类名();
+
+    // 方法
+    void 方法名();
+};
+
 class DataSubscriberNode : public rclcpp::Node
+# 定义一个叫DataSubscriberNode 的类继承rclcpp：：Node。
 {
 public:
     DataSubscriberNode()
     : Node("data_subscriber_node"), motion_ctrl_received_(false)
+#这是构造函数，构造了一个data_subscriber_node.因为DataSubscriberNode不是基本class而是继承ROS2里的node类，所以在创建构造函数的时候需要DataSubscriberNode(): Node("data_subscriber_node")。 如果是创建基类Node的构造函数可以写成： Node("data_subscriber_node")。 
     {
         RCLCPP_INFO(this->get_logger(), "DataSubscriberNode constructed");
     }
