@@ -1,6 +1,6 @@
 from setuptools import setup
 
-package_name = 'Motion_Ctrl_sim'
+package_name = 'timestamp_processing_node'
 
 setup(
     name=package_name,
@@ -16,10 +16,11 @@ setup(
     maintainer='pc',
     maintainer_email='zhupengcheng777@gmail.com',
     description='TODO: Package description',
-    license='TODO: License declaration',
+    license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            "timestamp_processing_node = timestamp_processing_node.timestamp_processing_node:main"
         ],
     },
 )

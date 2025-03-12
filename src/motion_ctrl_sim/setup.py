@@ -1,6 +1,6 @@
 from setuptools import setup
 
-package_name = 'Motion_Ctrl_diablo'
+package_name = 'motion_ctrl_sim'
 
 setup(
     name=package_name,
@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'Motion_Ctrl_diablo = Motion_Ctrl_diablo.Motion_Ctrl_diablo:main'
+        "motion_ctrl_sim = motion_ctrl_sim.motion_ctrl_sim:main"
         ],
     },
 )

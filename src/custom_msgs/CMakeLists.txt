@@ -42,6 +42,11 @@ find_package(ception_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/SyncedData.msg"
+  "msg/Joystick.msg"
+  "msg/MainButtons.msg"
+  "msg/Panel.msg"
+  "msg/SideButtons.msg"
+  
   DEPENDENCIES sensor_msgs motion_msgs ception_msgs std_msgs
 )
 
