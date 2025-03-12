@@ -14,11 +14,28 @@
 #include <message_filters/synchronizer.h>
 #include <message_filters/sync_policies/approximate_time.h>
 
+# class 在c++中是一种封装数据和行为的模板，定义了属性和方法，然后我们可以用这个类创建具体的对象object。
+class 类名 {
+private:   // 私有成员
+    // 只能在类内部访问的变量或方法
+
+public:    // 公有成员
+    // 可以在类外部访问的变量或方法
+
+    // 构造函数
+    类名();
+
+    // 方法
+    void 方法名();
+};
+
 class DataSubscriberNode : public rclcpp::Node
+# 定义一个叫DataSubscriberNode 的类继承rclcpp：：Node。
 {
 public:
     DataSubscriberNode()
     : Node("data_subscriber_node"), motion_ctrl_received_(false)
+#这是构造函数，构造了一个data_subscriber_node.因为DataSubscriberNode不是基本class而是继承ROS2里的node类，所以在创建构造函数的时候需要DataSubscriberNode(): Node("data_subscriber_node")。 如果是创建基类Node的构造函数可以写成： Node("data_subscriber_node")。 
     {
         RCLCPP_INFO(this->get_logger(), "DataSubscriberNode constructed");
     }
@@ -51,7 +68,7 @@ DataSubscriberNode:
         RCLCPP_INFO(this->get_logger(), "Initializing DataSubscriberNode");
 
         auto qos = rclcpp::SystemDefaultsQoS();
-
+#创建QoS对象叫qos，使用系统默认
         imu_subscriber_ = std::make_shared<message_filters::Subscriber<sensor_msgs::msg::Imu>>(
             this->shared_from_this(), "/diablo/sensor/Imu", qos.get_rmw_qos_profile());
 
@@ -65,21 +82,22 @@ DataSubscriberNode:
             sensor_msgs::msg::Imu,
             motion_msgs::msg::LegMotors,
             ception_msgs::msg::IMUEuler>;
+# 定义一个同步策略SyncPolicy，ApproximateTime同步3个发布为50hz的数据
 
         sync_ = std::make_shared<message_filters::Synchronizer<SyncPolicy>>(
             SyncPolicy(100), *imu_subscriber_, *motors_subscriber_, *imu_euler_subscriber_);
-
+# 创建一个同步器sync_，并将3个订阅器传入。使用前面定义的同步策略
         sync_->registerCallback(std::bind(&DataSubscriberNode::syncCallback, this,
                                           std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
-
+# 当同步器有新的数据传入，回调函数会被触发。当3个话题timpstamp接近的时候，synCallback 会被调用。
         initializeCSVFile();
 
         motion_ctrl_subscriber_ = this->create_subscription<motion_msgs::msg::MotionCtrl>(
             "/diablo/MotionCmd", 10, std::bind(&DataSubscriberNode::motionCtrlCallback, this, std::placeholders::_1));
 
-        // 创建定时器以 50Hz 运行
+        // 创建定时器以 20Hz 运行
         timer_ = this->create_wall_timer(
-            std::chrono::milliseconds(20),  // 每 20 毫秒调用一次
+            std::chrono::milliseconds(50),  // 每 50 毫秒调用一次
             std::bind(&DataSubscriberNode::writeToCSVAtFixedRate, this));
 
         RCLCPP_INFO(this->get_logger(), "DataSubscriberNode initialized successfully");
@@ -155,6 +173,11 @@ private:
         std::lock_guard<std::mutex> lock(file_mutex_);
         last_motion_ctrl_ = *msg;  // 更新 MotionCtrl 数据
         motion_ctrl_received_ = true;
+        // 如果 IMU 数据存在，使用 IMU 的时间戳
+        if (last_imu_msg_) {
+            last_motion_ctrl_.header.stamp = last_imu_msg_->header.stamp;
+        }
+
         RCLCPP_INFO(this->get_logger(), "Updated MotionCtrl: forward=%.2f, left=%.2f, up=%.2f, roll=%.2f, pitch=%.2f, leg_split=%.2f",
                     last_motion_ctrl_.value.forward, last_motion_ctrl_.value.left, last_motion_ctrl_.value.up,
                     last_motion_ctrl_.value.roll, last_motion_ctrl_.value.pitch, last_motion_ctrl_.value.leg_split);
@@ -166,8 +189,11 @@ private:
         const motion_msgs::msg::LegMotors::ConstSharedPtr &motors_msg,
         const ception_msgs::msg::IMUEuler::ConstSharedPtr &imu_euler_msg)
     {
-        auto unified_timestamp = imu_msg->header.stamp;
-        logToCSV(unified_timestamp, imu_msg, motors_msg, imu_euler_msg);
+        #auto unified_timestamp = imu_msg->header.stamp;
+        #logToCSV(unified_timestamp, imu_msg, motors_msg, imu_euler_msg);
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        last_imu_msg_ = imu_msg;  // 缓存最新的 IMU 数据
+
     }
 
     void writeToCSVAtFixedRate()
@@ -183,7 +209,10 @@ private:
             last_motion_ctrl_.value.pitch = 0.0;
             last_motion_ctrl_.value.leg_split = 0.0;
         }
-
+    // 如果有缓存的数据，调用 logToCSV 写入数据
+    if (last_imu_msg_ && last_motors_msg_ && last_imu_euler_msg_) {
+        logToCSV(last_imu_msg_->header.stamp, last_imu_msg_, last_motors_msg_, last_imu_euler_msg_);
+    }
         motion_ctrl_received_ = false;  // 重置标志位
     }
 
