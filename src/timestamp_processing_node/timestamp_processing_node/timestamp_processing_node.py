@@ -36,7 +36,7 @@ class SensorDataSyncNode(Node):
         
         # Create subscribers
         self.create_subscription(Imu, 'diablo/sensor/Imu', self.imu_callback, 10)
-        self.create_subscription(LegMotors, 'diablo/sensor/LegMotors', self.leg_motors_callback, 10)
+        self.create_subscription(LegMotors, 'diablo/sensor/Motors', self.leg_motors_callback, 10)
         self.create_subscription(MotionCtrl, 'diablo/MotionCmd', self.motion_ctrl_callback, 10)
         self.create_subscription(IMUEuler, 'diablo/sensor/ImuEuler', self.imu_euler_callback, 10)
 

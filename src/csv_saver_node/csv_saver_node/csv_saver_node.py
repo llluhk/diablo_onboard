@@ -57,16 +57,16 @@ class DataSubscriberNode(Node):
                 msg.imu.orientation.x, msg.imu.orientation.y, msg.imu.orientation.z, msg.imu.orientation.w,
                 msg.imu.angular_velocity.x, msg.imu.angular_velocity.y, msg.imu.angular_velocity.z,
                 msg.imu.linear_acceleration.x, msg.imu.linear_acceleration.y, msg.imu.linear_acceleration.z,
-                msg.motors.left_hip_enc_rev, msg.motors.left_hip_pos, msg.motors.left_hip_vel, msg.motors.left_hip_iq,
-                msg.motors.left_knee_enc_rev, msg.motors.left_knee_pos, msg.motors.left_knee_vel, msg.motors.left_knee_iq,
-                msg.motors.left_wheel_enc_rev, msg.motors.left_wheel_pos, msg.motors.left_wheel_vel, msg.motors.left_wheel_iq,
-                msg.motors.right_hip_enc_rev, msg.motors.right_hip_pos, msg.motors.right_hip_vel, msg.motors.right_hip_iq,
-                msg.motors.right_knee_enc_rev, msg.motors.right_knee_pos, msg.motors.right_knee_vel, msg.motors.right_knee_iq,
-                msg.motors.right_wheel_enc_rev, msg.motors.right_wheel_pos, msg.motors.right_wheel_vel, msg.motors.right_wheel_iq,
-                msg.motors.left_leg_length, msg.motors.right_leg_length,
+                msg.leg_motors.left_hip_enc_rev, msg.leg_motors.left_hip_pos, msg.leg_motors.left_hip_vel, msg.leg_motors.left_hip_iq,
+                msg.leg_motors.left_knee_enc_rev, msg.leg_motors.left_knee_pos, msg.leg_motors.left_knee_vel, msg.leg_motors.left_knee_iq,
+                msg.leg_motors.left_wheel_enc_rev, msg.leg_motors.left_wheel_pos, msg.leg_motors.left_wheel_vel, msg.leg_motors.left_wheel_iq,
+                msg.leg_motors.right_hip_enc_rev, msg.leg_motors.right_hip_pos, msg.leg_motors.right_hip_vel, msg.leg_motors.right_hip_iq,
+                msg.leg_motors.right_knee_enc_rev, msg.leg_motors.right_knee_pos, msg.leg_motors.right_knee_vel, msg.leg_motors.right_knee_iq,
+                msg.leg_motors.right_wheel_enc_rev, msg.leg_motors.right_wheel_pos, msg.leg_motors.right_wheel_vel, msg.leg_motors.right_wheel_iq,
+                msg.leg_motors.left_leg_length, msg.leg_motors.right_leg_length,
                 msg.imu_euler.roll, msg.imu_euler.pitch, msg.imu_euler.yaw,
-                msg.motion_ctrl.forward, msg.motion_ctrl.left, msg.motion_ctrl.up,
-                msg.motion_ctrl.roll, msg.motion_ctrl.pitch, msg.motion_ctrl.leg_split
+                msg.motion_ctrl.motion_ctrl.value.forward, msg.motion_ctrl.motion_ctrl.value.left, msg.motion_ctrl.motion_ctrl.value.up,
+                msg.motion_ctrl.motion_ctrl.value.roll, msg.motion_ctrl.motion_ctrl.value.pitch, msg.motion_ctrl.motion_ctrl.value.leg_split
             ])
             self.get_logger().info("Synchronized data written to CSV")
 
