@@ -1,0 +1,303 @@
+import os
+import torch
+import numpy as np
+import pandas as pd
+from torch.utils.data import DataLoader, TensorDataset
+import torch.nn as nn
+import torch.optim as optim
+from std_msgs.msg import Float32MultiArray  # 接收的消息类型
+import rclpy
+from rclpy.node import Node
+import os
+import rclpy
+
+# Dataset 类，用于加载数据
+class RobotDataset:
+    def __init__(self, data, time_steps=50, feature_dim=45, batch_size=16, normalization='standard'):
+        self.data = data
+        self.time_steps = time_steps
+        self.feature_dim = feature_dim
+        self.batch_size = batch_size
+        self.normalization = normalization
+
+    def get_loader(self, batch_size=16):
+        """返回一个 DataLoader用于加载数据"""
+        dataset = TensorDataset(torch.tensor(self.data, dtype=torch.float32))
+        return DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+    def standardize(self, data):
+        """标准化数据"""
+        mean = np.mean(data, axis=0)
+        std = np.std(data, axis=0)
+        return (data - mean) / std
+
+    def min_max_normalize(self, data):
+        """归一化数据"""
+        min_val = np.min(data, axis=0)
+        max_val = np.max(data, axis=0)
+        return (data - min_val) / (max_val - min_val)
+
+    def _process_csv_file(self, file_path):
+        df = pd.read_csv(file_path)
+
+        # 只取数据部分，不包括标签列
+        features = df.values  # 没有标签列
+
+        # 根据要求进行标准化或归一化
+        if self.normalization == 'standard':
+            features = self.standardize(features)
+        elif self.normalization == 'minmax':
+            features = self.min_max_normalize(features)
+
+        features = features.reshape(-1, self.time_steps, self.feature_dim)
+
+        self.data.append(features)
+
+    def _get_csv_files(self, directory):
+        csv_files = [os.path.join(directory, f) for f in os.listdir(directory) if f.endswith('.csv')]
+        return csv_files
+
+    def get_data(self):
+        data = np.concatenate(self.data, axis=0)
+        return data
+
+# CNN-LSTM-Transformer 模型
+class CNN_LSTM_Transformer(torch.nn.Module):
+    def __init__(self, input_dim, time_steps, lstm_units, num_heads, ff_dim, num_classes):
+        super(CNN_LSTM_Transformer, self).__init__()
+
+        # CNN 层
+        self.cnn = torch.nn.Sequential(
+            torch.nn.Conv1d(input_dim, 64, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool1d(kernel_size=2),
+            torch.nn.Conv1d(64, 128, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.MaxPool1d(kernel_size=2),
+            torch.nn.Conv1d(128, 256, kernel_size=3, padding=1),
+            torch.nn.ReLU(),
+            torch.nn.AdaptiveMaxPool1d(1)
+        )
+
+        # LSTM 层
+        self.lstm = torch.nn.LSTM(input_size=256, hidden_size=lstm_units, batch_first=True)
+
+        # Transformer 层
+        self.transformer = torch.nn.Transformer(
+            d_model=lstm_units,
+            nhead=num_heads,
+            num_encoder_layers=2,
+            dim_feedforward=ff_dim,
+            dropout=0.1,
+            batch_first=True
+        )
+
+        # 输出层
+        self.fc = torch.nn.Sequential(
+            torch.nn.Linear(lstm_units, 128),
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.1),
+            torch.nn.Linear(128, num_classes)  # 分类任务，设定类别数
+        )
+
+    def forward(self, x):
+        # 输入形状: [batch_size, time_steps, feature_dim]
+        batch_size, time_steps, feature_dim = x.size()
+
+        # 通过 CNN 层
+        x = x.permute(0, 2, 1)  # [batch_size, feature_dim, time_steps]
+        x = self.cnn(x)  # [batch_size, cnn_out_channels, 1]
+        x = x.squeeze(2)  # [batch_size, cnn_out_channels]
+
+        # 通过 LSTM 层
+        x, _ = self.lstm(x.unsqueeze(1))  # LSTM 输入需要 [batch_size, time_steps, input_dim]
+
+        # 通过 Transformer 层
+        x = self.transformer(x, x)
+
+        # 获取最后一个时间步的输出
+        x = x[:, -1, :]
+
+        # 通过全连接层
+        x = self.fc(x)
+        return x
+
+# 订阅者节点
+class DataProcessingSubscriber(Node):
+    def __init__(self):
+        super().__init__('data_processing_subscriber')
+
+        # 创建订阅器，订阅 /processed_data 话题
+        self.subscription = self.create_subscription(
+            Float32MultiArray,
+            '/processed_data',
+            self.listener_callback,
+            10
+        )
+
+        # 初始化模型
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = CNN_LSTM_Transformer(
+            input_dim=45,
+            time_steps=50,
+            lstm_units=64,
+            num_heads=4,
+            ff_dim=128,
+            num_classes=4  # 分类任务，设定类别数
+        ).to(self.device)
+
+        # 定义优化器
+        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+
+        # 加载模型权重
+        checkpoint_path = "/home/pc/diablo_ws/src/model_node/checkpoints/best_model.pth"
+        if os.path.exists(checkpoint_path):
+            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            
+            # 加载模型的参数
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            
+            # 加载优化器的状态
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            
+            # 加载 epoch 和最佳验证准确度
+            epoch = checkpoint['epoch']
+            best_val_accuracy = checkpoint['best_val_accuracy']
+            
+            self.get_logger().info(f"Loaded model weights successfully from epoch {epoch}. Best validation accuracy: {best_val_accuracy:.2f}")
+        else:
+            self.get_logger().info("Model weights not found. Using untrained model.")
+        
+    def listener_callback(self, msg):
+        """订阅到消息后，处理数据并进行推理"""
+        # 从消息中提取数据
+        raw_data = np.array(msg.data, dtype=np.float32)
+
+        # 确保数据的长度是 time_steps * feature_dim 的整数倍
+        time_steps = 50
+        feature_dim = 45
+        if len(raw_data) % (time_steps * feature_dim) != 0:
+            padding = (time_steps * feature_dim) - (len(raw_data) % (time_steps * feature_dim))
+            raw_data = np.append(raw_data, [0.0] * padding)
+
+        # 重塑数据形状
+        data = raw_data.reshape(-1, time_steps, feature_dim)
+
+        # 创建数据加载器
+        dataset = RobotDataset(data, None, time_steps, feature_dim)  # 无标签数据
+        test_loader = dataset.get_loader(batch_size=1)
+
+        # 使用模型进行推理
+        predictions = self.load_model_and_test(test_loader)
+        self.get_logger().info(f"Predictions: {predictions}")
+    
+    def load_model_and_test(self, test_loader):
+        """加载模型并进行推理"""
+        self.model.eval()
+        predictions = []
+        with torch.no_grad():
+            for inputs in test_loader:
+                inputs = inputs[0].to(self.device)  # 只需要输入数据
+                outputs = self.model(inputs)
+                predicted_classes = torch.argmax(outputs, dim=1)
+                predictions.extend(predicted_classes.cpu().numpy())
+        return predictions
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = DataProcessingSubscriber()
+    rclpy.spin(node)
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+
+-------------------------------------------------------------
+
+SVM with feature creation
+-------------------------------------------------------------
+import joblib
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import Float32MultiArray  # 假设数据是数组类型
+import numpy as np
+
+# 加载模型
+MODEL_PATH = '/home/pc/diablo_ws/src/model_node/checkpoints/libSVM_draft.pkl'
+SCALER_PATH = "/home/pc/diablo_ws/src/model_node/checkpoints/scaler.joblib"
+
+try:
+    model = joblib.load(MODEL_PATH)
+    scaler = joblib.load(SCALER_PATH)
+    print(" SVM 模型和 MinMaxScaler 成功加载！")
+except Exception as e:
+    print(f"加载模型或 `scaler` 失败: {e}")
+    model = None
+    scaler = None  # 避免程序崩溃
+
+class CollisionDetectionNode(Node):
+    def __init__(self):
+        super().__init__('collision_detection_node')
+        # 创建订阅器，订阅 /processed_data 话题
+        self.subscription = self.create_subscription(
+            Float32MultiArray,
+            '/processed_data',
+            self.listener_callback,
+            10
+        )
+        self.subscription  # 防止变量被垃圾回收
+        self.get_logger().info("Collision Detection Node 已启动，等待数据...")
+
+    def listener_callback(self, msg):
+        if model is None or scaler is None:
+            self.get_logger().error("SVM 模型未加载，无法进行预测！")
+
+        # **转换 ROS2 消息数据为 NumPy 数组**
+        sensor_data = np.array(msg.data)  # ⚠️ 这里不要 reshape ！
+
+        # **确保数据是 2D (1, 99)，不多加一个维度**
+        if sensor_data.ndim == 1:  # 如果数据是一维 (99,)
+            sensor_data = sensor_data.reshape(1, -1)  # 变成 (1, 99)
+
+        # **打印转换后数据维度**
+        #self.get_logger().info(f"转换后数据维度: {sensor_data.shape}")
+
+        # 确保数据维度和模型匹配
+        expected_features = model.n_features_in_  
+        if sensor_data.shape[1] != expected_features:
+            self.get_logger().error(f"⚠️ 数据维度错误！期望 {expected_features} 维，实际 {sensor_data.shape[1]} 维")
+            return
+
+        try:
+            sensor_data_scaled = scaler.transform(sensor_data)
+        except Exception as e:
+            self.get_logger().error(f"归一化失败: {e}")
+            return
+        # 确保数据维度匹配
+        
+        try:
+
+
+            # 进行碰撞预测
+            prediction = model.predict(sensor_data_scaled)[0]  # 预测是否发生碰撞
+            
+           
+            # **检查 prediction 是否是 1、2 或 3**
+            if prediction in [1, 2, 3]:
+                self.get_logger().warn(f'碰撞检测: 发生碰撞！(类别: {prediction})')
+            else:
+                self.get_logger().info(f'碰撞检测: 无碰撞 (类别: {prediction})')
+
+        except Exception as e:
+            self.get_logger().error(f"预测错误: {e}")
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = CollisionDetectionNode()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+if __name__ == '__main__':
+    main()
+

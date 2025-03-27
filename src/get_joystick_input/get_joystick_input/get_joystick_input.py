@@ -8,15 +8,20 @@ import serial
 class CurrentInput(Node):
     def __init__(self):
         super().__init__('current_input')
-        self.panel_pub = self.create_publisher(Panel, '/carrierbot/Panel', 10)
-        #创建发布器用于发布名为/carrierbot/Panel topic.
-        self.declare_parameter('serial_port', '/dev/ttyUSB0')
-        #声明一个参数来设置串口连接：/dev/ttyUSB0是ROS2默认USB串口设备路径
+        self.panel_pub = self.create_publisher(Panel, 'carrierbot/Panel', 10)
+        #创建发布器用于发布名为carrierbot/Panel topic.
+        self.declare_parameter('serial_port', '/dev/ttyUSB1')
+        #声明一个参数来设置串口连接：/dev/ttyUSB1是ROS2默认USB串口设备路径
+        # 登陆DIABLO，连接USB后通过： dmesg | grep tty  获取设备路径
         self.serial_port = self.get_parameter('serial_port').get_parameter_value().string_value
         #这行代码获取刚才声明的参数，并将其转换成字符串类型
         self.baud_rate = 115200
         #设置串口通信的传输速度
-        self.serial_connection = serial.Serial(self.serial_port,self.baud_rate,timeout=1)
+        try:
+            self.serial_connection = serial.Serial(self.serial_port, self.baud_rate, timeout=1)
+        except serial.SerialException as e:
+            self.get_logger().error(f"Failed to open serial port {self.serial_port}: {e}")
+            self.serial_connection = None
         #通过pyserial库创建了一个串口连接对象，创建完成后就可以进行数据的读取和写入
         self.timer = self.create_timer(0.05, self.on_timer)
         
@@ -28,7 +33,7 @@ class CurrentInput(Node):
             line = self.serial_connection.readline().decode('utf-8').strip()
             #解析数据
             if line:
-                self.get_logger().info(f'line recieved: {line}')
+                #self.get_logger().info(f'line recieved: {line}')
                 values = line.split("\t")
                 # publish read serial data
                 panel_msg = Panel()
