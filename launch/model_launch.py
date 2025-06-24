@@ -28,25 +28,46 @@ def generate_launch_description():
     )
 
     model_node =Node(
-        package="model_node",
+       package="model_node",
         executable="model_node"
     )
 
-    #diablo_ctrl_node=Node(
-        #package="diablo_ctrl",
-        #executable="diablo_ctrl_node"
-    #)
+    motion_mux =Node(
+        package="motion_mux",
+        executable="motion_mux_node"
+    )
+
+    escape_node =Node(
+        package="escape_node",
+        executable="escape_node"
+    )
+
+
+    collision_publish=Node(
+        package="button_serial",
+        executable="button_serial_node"
+    )
+
+
+    diablo_ctrl_node=Node(
+        package="diablo_ctrl",
+        executable="diablo_ctrl_node"
+    )
+
 
 
     # 创建LaunchDescription对象launch_description,用于描述launch文件
     launch_description = LaunchDescription([
+        diablo_ctrl_node,
         get_joystick_input,
         motion_ctrl_diablo,
         timestamp_processing_node,
         sync_node
         ,data_processing_node
         , model_node
-        #,diablo_ctrl_node
+        , motion_mux
+        , escape_node
+        ,collision_publish
     ])
 
     # 返回让 ROS 2 根据 launch 描述执行节点
