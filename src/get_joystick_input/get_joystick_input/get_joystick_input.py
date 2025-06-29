@@ -10,7 +10,7 @@ class CurrentInput(Node):
         super().__init__('current_input')
         self.panel_pub = self.create_publisher(Panel, 'carrierbot/Panel', 10)
         #创建发布器用于发布名为carrierbot/Panel topic.
-        self.declare_parameter('serial_port', '/dev/ttyUSB1')
+        self.declare_parameter('serial_port', '/dev/ttyUSB0')
         # 上面里面的port是/dev/ttyUSB1， 外面是ttyACM0
         # 登陆DIABLO，连接USB后通过： dmesg | grep tty  获取设备路径
         self.serial_port = self.get_parameter('serial_port').get_parameter_value().string_value
