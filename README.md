@@ -20,6 +20,7 @@ Additionally, when a robot becomes stuck, motor stall currents can damage compon
 👉 To address this, we implement robust collision detection and post-collision escape behaviors based solely on internal sensor data.
 
 🎯 2. Task Statement
+
 🧠 Objective 1 — Collision Classification
 
 Develop a neural network–based classification model to detect collisions using:
@@ -45,6 +46,8 @@ Detect collisions within 200 ms
 Trigger escape responses to prevent further damage
 
 <img width="600" alt="DIABLO robot" src="https://github.com/user-attachments/assets/12792c48-b529-4241-8878-8f4c84444655" />
+
+
 🚀 3. Expected Results and Benefits
 
 High accuracy: >99% collision classification in indoor environments
@@ -60,5 +63,4 @@ Aesthetic integrity: maintains the robot’s clean design
 Real-world validation: all experiments conducted on an actual DIABLO robot
 
 🎥 Demo Video
-
-▶️ Watch the demo on YouTube
+https://youtu.be/GtcHjTE9KhQ
